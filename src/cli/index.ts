@@ -18,6 +18,7 @@ import {
   provisionNamedTunnel,
 } from "../tunnel/named-provision.js";
 import { parseZoneInput, suggestedNamedHostname } from "../tunnel/hostname.js";
+import { setupNamedDomain } from "../tunnel/setup-domain.js";
 import {
   isNamedTunnelReady,
   NAMED_LOGIN_PROMPT,
@@ -25,6 +26,7 @@ import {
   needsTunnelChoice,
   readTunnelState,
   TUNNEL_CHOICE_PROMPT,
+  type TunnelState,
 } from "../tunnel/state.js";
 import { Logger } from "../logger/index.js";
 import { getStateDir } from "../config/paths.js";
@@ -194,9 +196,9 @@ interface AdminInfo {
 
 async function ensureBridgeAndTunnel(
   workspaceRoot: string,
-  opts: { tunnel: boolean }
+  opts: { tunnel: boolean; tunnelState?: TunnelState }
 ): Promise<{ runtime: RuntimeState; info: AdminInfo; mcpUrl: string | null }> {
-  const { runtime } = await ensureBridge(workspaceRoot);
+  const { runtime } = await ensureBridge(workspaceRoot, { tunnelState: opts.tunnelState });
   let info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
   let mcpUrl: string | null = info.publicUrl ? `${info.publicUrl}/mcp` : null;
   if (opts.tunnel && !info.publicUrl) {
@@ -238,6 +240,7 @@ program
       workspaceRoot: resolveWorkspace(opts.workspace),
       port: opts.port ? parseInt(opts.port, 10) : undefined,
       logger,
+      tunnelState: process.env.C2C_NAMED_TUNNEL_STATE ? JSON.parse(process.env.C2C_NAMED_TUNNEL_STATE) as TunnelState : undefined,
     });
     const shutdown = (): void => {
       void bridge.close().then(() => process.exit(0));
@@ -286,11 +289,13 @@ program
   .command("setup")
   .description("First-time setup: bridge + secure connection + pairing code")
   .option("-w, --workspace <path>")
+  .option("--domain <hostname>", "exact Cloudflare hostname; failure never falls back to a temporary address")
   .option("--no-tunnel", "local-only setup (development)")
   .option("--json", "machine-readable output", false)
-  .action(async (opts: { workspace?: string; tunnel: boolean; json: boolean }) => {
+  .action(async (opts: { workspace?: string; domain?: string; tunnel: boolean; json: boolean }) => {
     const root = resolveWorkspace(opts.workspace);
     try {
+      if (opts.domain !== undefined && !opts.tunnel) throw new Error("--domain cannot be combined with --no-tunnel");
       if (!opts.json) {
         say(PRODUCT_NAME);
         say("");
@@ -298,7 +303,9 @@ program
         say("");
       }
       const sandbox = trySandboxAllow();
-      const { runtime, info, mcpUrl } = await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
+      const { runtime, info, mcpUrl } = opts.domain !== undefined
+        ? await setupNamedDomain(new Workspace(root), opts.domain, (tunnelState) => ensureBridgeAndTunnel(root, { tunnel: true, tunnelState }))
+        : await ensureBridgeAndTunnel(root, { tunnel: opts.tunnel });
       const connectorName = mcpUrl
         ? persistWorkspaceEndpoint({
             workspaceId: info.workspaceId,
@@ -331,6 +338,7 @@ program
               mode: isNamedTunnelReady(tunnelState) ? "named" : "quick",
               hostname: tunnelState.hostname ?? null,
               fallback: Boolean(tunnelState.fallbackReason),
+              ...(opts.domain !== undefined ? { verified: true } : {}),
             },
           })
         );
@@ -516,7 +524,7 @@ program
       : "Codex with ChatGPT";
     const tunnelState = workspace ? readTunnelState(workspace.id) : null;
     const namedReady = tunnelState ? isNamedTunnelReady(tunnelState) : false;
-    const namedCredential = namedReady ? inspectNamedTunnelCredentials(tunnelState?.tunnelId) : null;
+    const namedCredential = namedReady ? inspectNamedTunnelCredentials(tunnelState?.tunnelId, tunnelState?.credentialsFile) : null;
     const namedCredentialFailure = Boolean(namedCredential && namedCredential.status !== "ready");
     let namedRepair: { needed: boolean; userMessage?: string } = { needed: false };
     let chatgptRepair: {

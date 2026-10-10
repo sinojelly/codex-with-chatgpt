@@ -15,7 +15,6 @@ import { hostnameSlug, parseZoneInput, suggestedNamedHostname } from "../src/tun
 import {
   chooseQuickTunnel,
   cloudflaredCredentialPath,
-  isBenignRouteError,
   inspectNamedTunnelCredentials,
   namedTunnelCredentialRepairMessage,
   parseCreatedTunnel,
@@ -322,9 +321,6 @@ ID                                   NAME          CREATED
     ).toEqual({ id: "22222222-2222-2222-2222-222222222222", name: "c2c-abc" });
   });
 
-  it("treats an existing DNS route as success", () => {
-    expect(isBenignRouteError("Failed to add route: record already exists")).toBe(true);
-  });
 });
 
 describe("tunnel preference state", () => {
