@@ -308,3 +308,70 @@ git diff --check
 ```
 
 结果：类型检查和构建成功；19 个测试文件、196 项测试全部通过；新 dist 的 setup 帮助已显示 domain 参数；差异格式检查通过。真实域名验证结果在后续小节追加。
+
+第一阶段已提交：`2704602`（`fix: 支持 setup 显式配置并验证固定域名`）。提交说明包含行为修改、失败恢复与测试结果。
+
+### 9.4 Windows CMD 真实域名验证
+
+以下均为 2026-10-10 本机实际执行记录，时间使用北京时间（UTC+8）。Cloudflare 网络操作与用户状态目录写入通过沙箱外执行完成；初次沙箱内列隧道时曾出现 socket 权限拒绝，提升执行权限后正常，确认该错误属于验证环境的网络限制。
+
+| 时间 | 验证 | 结果 |
+| --- | --- | --- |
+| 20:39 | 新 setup --domain，为 studyos 创建隧道并绑定 sinojelly.kdns.fr | `ok: true`、`mode: named`、`fallback: false`、`verified: true` |
+| 20:40 | 通过 `cmd.exe /d /c` 重复执行同一 domain 配置 | 同一隧道 UUID、同一 MCP URL，DNS 幂等配置成功 |
+| 20:41 | 通过 CMD 停止 Bridge，再执行不带 domain 的 setup | 从保存状态恢复 named，地址保持不变 |
+| 20:41 | 从公网读取 health、OAuth 及 MCP 资源发现信息 | 工作区 ID 匹配；issuer、授权/令牌端点及 resource 都使用固定域名 |
+| 20:41 | `doctor --no-fix --json` | node、sandbox、workspace、bridge、mcp、oauth、tunnel 全部 ok；未执行修复 |
+
+创建并复用的资源：
+
+```text
+工作区：D:\develop\gitee\studyos
+工作区 ID：a980b786ad95
+隧道名称：c2c-a980b786ad95
+隧道 UUID：f1dfd5c6-84fe-4fe7-b054-cdcf3276762b
+访问域名：sinojelly.kdns.fr
+MCP URL：https://sinojelly.kdns.fr/mcp
+凭据文件：C:\Users\Jelly\.cloudflared\f1dfd5c6-84fe-4fe7-b054-cdcf3276762b.json
+```
+
+独立 cloudflared 配置经 `cloudflared tunnel --config <文件> ingress validate` 检查返回 OK。停止恢复之后通过 Windows 进程列表确认该 UUID 只有一个 cloudflared 进程；远端列表确认只有该工作区的一条隧道记录。没有强制覆盖已有 DNS，没有输出证书、TunnelSecret、管理令牌或配对码。
+
+公网 health 的实际响应：
+
+```json
+{
+  "service": "c2c-bridge",
+  "version": "0.1.3",
+  "workspaceId": "a980b786ad95",
+  "status": "ok"
+}
+```
+
+注意：doctor 的 `chatgptRepair.needed: false` 表示已保存的 URL 与当前 URL 相同，不证明 ChatGPT 连接器已经完成登录和授权。本次验证范围到公网 Bridge、MCP 未授权响应以及 OAuth 发现；没有操作 ChatGPT UI。
+
+### 9.5 用户可直接复制的 CMD 命令
+
+当前会话的 PATH 查找能发现 cloudflared.exe，但 `where c2c` 未发现入口。因此在 `studyos` 中可使用以下不依赖全局命令安装的形式：
+
+```bat
+cd /d D:\develop\gitee\studyos
+node "D:\develop\gitee\codex-with-chatgpt\bin\c2c.js" setup --domain sinojelly.kdns.fr
+```
+
+配置已经保存，以后恢复连接只需：
+
+```bat
+node "D:\develop\gitee\codex-with-chatgpt\bin\c2c.js" setup
+```
+
+查看该工作区的选择与健康状况：
+
+```bat
+node "D:\develop\gitee\codex-with-chatgpt\bin\c2c.js" tunnel status --json
+node "D:\develop\gitee\codex-with-chatgpt\bin\c2c.js" doctor --no-fix --json
+```
+
+若之后已把 c2c 安装到 PATH，上述 Node 入口可以直接替换为 c2c。当前 Bridge 保持运行，固定地址已可访问。ChatGPT 连接器应使用 `https://sinojelly.kdns.fr/mcp`，配对时再通过 `c2c pair` 生成新码。
+
+本次没有把环境凭据、studyos 项目文件或机器状态文件提交 Git；Git 提交仅包含本项目的修复、测试和文档。
