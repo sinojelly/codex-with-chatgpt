@@ -375,3 +375,24 @@ node "D:\develop\gitee\codex-with-chatgpt\bin\c2c.js" doctor --no-fix --json
 若之后已把 c2c 安装到 PATH，上述 Node 入口可以直接替换为 c2c。当前 Bridge 保持运行，固定地址已可访问。ChatGPT 连接器应使用 `https://sinojelly.kdns.fr/mcp`，配对时再通过 `c2c pair` 生成新码。
 
 本次没有把环境凭据、studyos 项目文件或机器状态文件提交 Git；Git 提交仅包含本项目的修复、测试和文档。
+
+## 10. 2026-10-12：第二个工作区出现临时地址的复现与修复
+
+WealthSail 工作区为 `D:\develop\gitee\WealthSail`，ID 为 `7d8d3c79bbbb`。`sinojelly.kdns.fr` 已属于 studyos 的 DNS 路由；直接为 WealthSail 执行 `c2c setup --domain sinojelly.kdns.fr` 时，Cloudflare 返回 1003：该主机名已经有 A、AAAA 或 CNAME 记录。这是正确的冲突拒绝，不能覆盖 studyos 的记录。改用 `wealthsail.sinojelly.kdns.fr` 后，复用失败尝试中创建的 `c2c-7d8d3c79bbbb` 隧道，固定域名配置及公网身份验证均成功。
+
+用户随后报告无参数 `c2c setup` 又返回 `trycloudflare.com`。现场读取显示：隧道状态文件已保存 `preference: named` 和 `hostname: wealthsail.sinojelly.kdns.fr`，但正在运行的 Bridge 报告 `provider: cloudflare-quick`、`publicUrl` 为临时地址。使用与用户相同的 CMD 目录和 `c2c.cmd` 执行无参数 setup，确实复现了临时地址；JSON 输出甚至同时报告 `mode: named` 和临时 URL。
+
+确认的缺陷位于 `ensureBridgeAndTunnel`：它调用 `ensureBridge` 时，只要发现同一工作区已有健康 Bridge 就直接复用，没有检查该进程的隧道提供器和公网地址是否与最新保存的配置一致。一个先前启动的 quick Bridge 因此可以覆盖普通 setup 的实际连接。该 quick 进程何时由哪个操作启动，并未从现存日志完全确定；本次修复针对已经证实的“运行配置与保存配置不一致时仍复用”的缺陷。
+
+修复后，在需要公网连接时比较运行提供器、当前 URL 与目标工作区状态。若状态要求 named 而 Bridge 为 quick、或者 named 域名不同，先停止旧 Bridge 并等待确认退出，再按目标状态启动。若状态要求 quick 而旧 Bridge 为 named，也同样重启。启动后再次检查，未匹配则报错，不生成指向错误 URL 的配对结果。源码注释解释了为什么仅修改磁盘状态不会改变已运行进程。
+
+新增两项回归测试覆盖 named 状态复用 quick Bridge、named 域名不一致及 quick 状态复用 named Bridge。测试先失败后通过。完整验证：19 个测试文件、198 项测试通过；TypeScript 类型检查和构建通过。随后从实际 quick Bridge 出发，在 WealthSail 目录执行普通 CMD `c2c setup`，恢复 `https://wealthsail.sinojelly.kdns.fr/mcp`。再停止 Bridge 并执行不带 domain 的 setup，冷启动仍返回同一固定域名。公网 `/health` 的 workspaceId 为 `7d8d3c79bbbb`，`doctor --no-fix` 的 Bridge、MCP、OAuth、Tunnel 均正常；studyos 的 `sinojelly.kdns.fr` 仍返回其原工作区 ID `a980b786ad95`。
+
+两个工作区应分别使用不同主机名：
+
+```text
+studyos     → https://sinojelly.kdns.fr/mcp
+WealthSail  → https://wealthsail.sinojelly.kdns.fr/mcp
+```
+
+在 WealthSail 目录中，今后运行 `c2c setup` 即可使用保存的固定地址，不必再传 domain。若命令输出 `trycloudflare.com`，应视为实际运行配置不一致，不要根据 JSON 里的 named 标签判断已恢复；升级到包含本次修复的构建后重试。

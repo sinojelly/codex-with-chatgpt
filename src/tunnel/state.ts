@@ -52,6 +52,16 @@ export function namedTunnelBinding(state: TunnelState): { tunnelName: string; ho
   return { tunnelName: state.tunnelName, hostname: state.hostname, tunnelId: state.tunnelId, credentialsFile: state.credentialsFile };
 }
 
+/** A live Bridge fixes its tunnel provider when it starts. Disk state alone
+ * cannot change that provider, so setup must replace a mismatched process. */
+export function requiresTunnelRestart(state: TunnelState, provider: string, publicUrl: string | null): boolean {
+  if (isNamedTunnelReady(state)) {
+    if (provider !== "cloudflare-named") return true;
+    return Boolean(publicUrl && publicUrl.replace(/\/+$/, "").toLowerCase() !== `https://${state.hostname!.toLowerCase()}`);
+  }
+  return provider === "cloudflare-named";
+}
+
 export const TUNNEL_CHOICE_PROMPT = `连 ChatGPT 之前，有一条可选的。
 你有没有 Cloudflare 账号，并且有没有一个域名已经加在 Cloudflare 里？
 - 有：可以用固定域名。插件配一次，以后电脑重启一般不用再改插件。要登录一次 Cloudflare，并在你的域名下加一个子域名。

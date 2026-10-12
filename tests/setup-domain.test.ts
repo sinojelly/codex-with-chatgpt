@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chooseQuickTunnel, ProcessCloudflaredAccount, provisionNamedTunnel, type CloudflaredAccount } from "../src/tunnel/named-provision.js";
-import { readTunnelState } from "../src/tunnel/state.js";
+import { readTunnelState, requiresTunnelRestart } from "../src/tunnel/state.js";
 import { setupNamedDomain, verifyNamedEndpoint } from "../src/tunnel/setup-domain.js";
 import { SERVICE_NAME } from "../src/version.js";
 import { cleanup, isolateStateDir } from "./helpers.js";
@@ -115,5 +115,18 @@ describe("named endpoint verification and commit", () => {
     });
     expect(verify).toHaveBeenCalledWith(candidate.hostname, "ws");
     expect(readTunnelState("ws")).toEqual(candidate);
+  });
+});
+
+describe("reuse a running Bridge", () => {
+  it("restarts a quick Bridge when this workspace has a saved named hostname", () => {
+    const state = { workspaceId: "ws", preference: "named" as const, tunnelName: "c2c-ws", hostname: "wealthsail.sinojelly.kdns.fr" };
+    expect(requiresTunnelRestart(state, "cloudflare-quick", "https://random.trycloudflare.com")).toBe(true);
+    expect(requiresTunnelRestart(state, "cloudflare-named", "https://other.sinojelly.kdns.fr")).toBe(true);
+    expect(requiresTunnelRestart(state, "cloudflare-named", "https://wealthsail.sinojelly.kdns.fr")).toBe(false);
+  });
+
+  it("restarts a named Bridge after the workspace selects a quick tunnel", () => {
+    expect(requiresTunnelRestart({ workspaceId: "ws", preference: "quick" }, "cloudflare-named", "https://wealthsail.sinojelly.kdns.fr")).toBe(true);
   });
 });

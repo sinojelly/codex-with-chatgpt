@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startBridge } from "../bridge/server.js";
 import { findBridgeObservation, findLiveBridge, type RuntimeState } from "../bridge/runtime.js";
-import { adminFetch, ensureBridge, stopBridge } from "../process/daemon.js";
+import { adminFetch, ensureBridge, stopBridge, stopBridgeAndWait } from "../process/daemon.js";
 import { Workspace } from "../workspace/manager.js";
 import { AuthStore } from "../auth/store.js";
 import { detectTunnelBinaries } from "../tunnel/detect.js";
@@ -25,6 +25,7 @@ import {
   NAMED_REPAIR_MESSAGE,
   needsTunnelChoice,
   readTunnelState,
+  requiresTunnelRestart,
   TUNNEL_CHOICE_PROMPT,
   type TunnelState,
 } from "../tunnel/state.js";
@@ -198,8 +199,22 @@ async function ensureBridgeAndTunnel(
   workspaceRoot: string,
   opts: { tunnel: boolean; tunnelState?: TunnelState }
 ): Promise<{ runtime: RuntimeState; info: AdminInfo; mcpUrl: string | null }> {
-  const { runtime } = await ensureBridge(workspaceRoot, { tunnelState: opts.tunnelState });
+  let { runtime } = await ensureBridge(workspaceRoot, { tunnelState: opts.tunnelState });
   let info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
+  if (opts.tunnel) {
+    const state = opts.tunnelState ?? readTunnelState(info.workspaceId);
+    if (requiresTunnelRestart(state, info.tunnel.provider, info.publicUrl)) {
+      // ensureBridge can reuse a healthy process started before the workspace
+      // selected its fixed hostname. Replace it before returning any URL or
+      // pairing code; otherwise setup reports named state with a quick URL.
+      await stopBridgeAndWait(workspaceRoot);
+      ({ runtime } = await ensureBridge(workspaceRoot, { tunnelState: opts.tunnelState ?? state }));
+      info = await adminFetch<AdminInfo>(runtime, "GET", "/admin/info");
+      if (requiresTunnelRestart(state, info.tunnel.provider, info.publicUrl)) {
+        throw new Error("Bridge tunnel mode still differs from the workspace configuration");
+      }
+    }
+  }
   let mcpUrl: string | null = info.publicUrl ? `${info.publicUrl}/mcp` : null;
   if (opts.tunnel && !info.publicUrl) {
     const binaries = detectTunnelBinaries();
