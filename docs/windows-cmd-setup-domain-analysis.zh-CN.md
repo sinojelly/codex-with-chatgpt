@@ -407,7 +407,7 @@ WealthSail  → https://wealthsail.sinojelly.kdns.fr/mcp
 
 本任务的执行环境在相同字面路径下能读到 `preference: "named"` 的状态文件，修改时间为 2026-10-12 20:34:29；即使进行只读提权检查也仍能读到。但这与用户当前 CMD 的目录结果矛盾，说明两边文件系统视图未一致，不能以本任务的状态文件作为用户机器上已经持久保存的证据，也不能声称其差异的底层原因已经查明。应以用户当前 CMD 的只读结果为准。
 
-用户随后在原 CMD 窗口运行 `c2c setup --domain wealthsail.sinojelly.kdns.fr` 并反馈成功。显式 setup 的实现只有在连接 URL 与所请求域名一致、且公网 `/health` 返回当前工作区 ID 后才写入 named 状态；因此这一步是将固定域名配置保存到用户当前环境的可靠恢复方式。用户未粘贴新的 status 或无参数 setup 输出，本轮不能把它们记为已实测通过。建议再运行 `c2c tunnel status --json`，确认 `preference: "named"`；之后无参数 setup 应恢复固定域名。若未来显式 setup 失败，应保留准确错误，不要把已存在的 DNS 记录强行改指向别的项目。
+用户随后在原 CMD 窗口运行 `c2c setup --domain wealthsail.sinojelly.kdns.fr` 并反馈成功。显式 setup 的实现只有在连接 URL 与所请求域名一致、且公网 `/health` 返回当前工作区 ID 后才写入 named 状态；因此这一步是将固定域名配置保存到用户当前环境的可靠恢复方式。接着用户再次运行**无参数** `c2c setup`，确认连接地址正确，即 `https://wealthsail.sinojelly.kdns.fr/mcp`。这验证了原报错路径已恢复固定域名；用户没有提供新的 status JSON，故不将其列为额外的实测结果。若未来显式 setup 失败，应保留准确错误，不要把已存在的 DNS 记录强行改指向别的项目。
 
 代码检查还发现 Quick Tunnel 处理进程退出时会把先前捕获的 `ERR` 行覆盖成通用的 `cloudflared exited (code 1)`。新增回归测试先复现这条诊断丢失，再修改退出处理保留原错误行，便于下一次准确定位 Cloudflare 返回的原因。
 
