@@ -396,3 +396,15 @@ WealthSail  → https://wealthsail.sinojelly.kdns.fr/mcp
 ```
 
 在 WealthSail 目录中，今后运行 `c2c setup` 即可使用保存的固定地址，不必再传 domain。若命令输出 `trycloudflare.com`，应视为实际运行配置不一致，不要根据 JSON 里的 named 标签判断已恢复；升级到包含本次修复的构建后重试。
+
+## 11. 2026-10-12：`cloudflared exited (code 1)` 再次排查
+
+用户在 WealthSail 执行无参数 setup 后报告 `cloudflared exited (code 1) before establishing a tunnel`。精确匹配源码发现：`before establishing a tunnel` 由 **Quick Tunnel** 提供器抛出，Named Tunnel 的对应错误写作 `before establishing the named tunnel`。所以仅凭此报错，不能认定已保存的固定域名隧道本身退出。检查时本机默认用户状态文件仍为 `preference: named`，现存 Bridge 的 provider 为 `cloudflare-named`；两个固定域名的 `/health` 也都能返回正确的工作区 ID。这与报错所用的 Quick Tunnel 路径不一致。
+
+现场尚未取得报错的同一个 CMD 窗口中的 `where c2c`、`echo %C2C_STATE_DIR%`、`c2c tunnel status --json` 输出，因此不能断言该窗口具体是用了不同的 CLI 入口、状态目录，还是在之前的另一次快速隧道启动中失败。排查时应在同一窗口运行这些只读命令，避免从另一个终端的状态推断原因。
+
+代码检查还发现 Quick Tunnel 处理进程退出时会把先前捕获的 `ERR` 行覆盖成通用的 `cloudflared exited (code 1)`。新增回归测试先复现这条诊断丢失，再修改退出处理保留原错误行，便于下一次准确定位 Cloudflare 返回的原因。
+
+同时，在本机 CMD 显式重复运行 `setup --domain wealthsail.sinojelly.kdns.fr` 时，Cloudflare 管理 API 曾对更新路由请求返回 `EOF`。原实现每次显式 setup 都重新请求远端路由，即使同一工作区已经保存了相同 hostname 与 UUID。新增回归测试验证这一重复调用会不必要地触发 API 故障。修复后，相同 hostname 的重复 setup 复用已保存的隧道配置；仍检查当前 Bridge 的实际 URL 和公网工作区身份，首次配置或换域名才请求 Cloudflare 管理 API。修复后同一 CMD 命令返回固定地址 `https://wealthsail.sinojelly.kdns.fr/mcp`，`verified: true`。
+
+如果报错窗口的 `tunnel status` 显示 `unset` 或 `quick`，使用该窗口执行 `c2c setup --domain wealthsail.sinojelly.kdns.fr` 可显式选择本工作区的固定地址；之后再用无参数 setup。不要传已属于 studyos 的 `sinojelly.kdns.fr`。如果同一窗口显示 named 却仍尝试 Quick Tunnel，需记录 `where c2c` 与状态目录后继续定位启动链，不能通过覆盖 DNS 或删除凭据掩盖问题。

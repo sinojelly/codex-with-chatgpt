@@ -225,6 +225,17 @@ describe("CloudflaredQuickTunnel", () => {
     expect(tunnel.status()).toMatchObject({ running: false, url: null });
   });
 
+  it("keeps cloudflared's startup error when the quick process exits", async () => {
+    const { child, tunnel } = setupTunnel(async () => healthResponse());
+    const starting = tunnel.start(3333);
+    child.stderr.write("ERR Unable to reach Cloudflare edge\n");
+    await new Promise((resolve) => setImmediate(resolve));
+    child.exitCode = 1;
+    child.emit("exit", 1, null);
+    await expect(starting).rejects.toThrow("Unable to reach Cloudflare edge");
+    expect(tunnel.status().detail).toContain("Unable to reach Cloudflare edge");
+  });
+
   it("rejects when spawning reports an asynchronous error", async () => {
     const { child, tunnel } = setupTunnel(async () => new Response(null));
     const starting = tunnel.start(3333);

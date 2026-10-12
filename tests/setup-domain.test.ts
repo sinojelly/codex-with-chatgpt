@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chooseQuickTunnel, ProcessCloudflaredAccount, provisionNamedTunnel, type CloudflaredAccount } from "../src/tunnel/named-provision.js";
-import { readTunnelState, requiresTunnelRestart } from "../src/tunnel/state.js";
+import { readTunnelState, requiresTunnelRestart, writeTunnelState } from "../src/tunnel/state.js";
 import { setupNamedDomain, verifyNamedEndpoint } from "../src/tunnel/setup-domain.js";
 import { SERVICE_NAME } from "../src/version.js";
 import { cleanup, isolateStateDir } from "./helpers.js";
@@ -115,6 +115,23 @@ describe("named endpoint verification and commit", () => {
     });
     expect(verify).toHaveBeenCalledWith(candidate.hostname, "ws");
     expect(readTunnelState("ws")).toEqual(candidate);
+  });
+
+  it("reuses a saved matching hostname without calling the Cloudflare management API", async () => {
+    dirs.push(isolateStateDir());
+    const saved = writeTunnelState({ workspaceId: "ws", preference: "named", tunnelId, tunnelName: "c2c-ws", hostname: "wealthsail.sinojelly.kdns.fr" });
+    const provision = vi.fn(async () => { throw new Error("Cloudflare API returned EOF"); });
+    const stop = vi.fn(async () => {});
+    const verify = vi.fn(async () => {});
+    const connection = await setupNamedDomain({ id: "ws", name: "WealthSail", root: "workspace" }, saved.hostname!, async () => ({ mcpUrl: "https://wealthsail.sinojelly.kdns.fr/mcp" }), {
+      observe: async () => ({ state: "healthy", runtime: {} as any }),
+      provision, stop, verify,
+    });
+    expect(connection.mcpUrl).toBe("https://wealthsail.sinojelly.kdns.fr/mcp");
+    expect(provision).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(verify).toHaveBeenCalledWith(saved.hostname, "ws");
+    expect(readTunnelState("ws")).toEqual(saved);
   });
 });
 

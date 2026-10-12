@@ -4,7 +4,7 @@ import { stopBridgeAndWait } from "../process/daemon.js";
 import { SERVICE_NAME } from "../version.js";
 import { normalizeNamedTunnelHostname } from "./cloudflared-named.js";
 import { provisionNamedTunnel } from "./named-provision.js";
-import { readTunnelState, tunnelStateFile, writeTunnelState, type TunnelState } from "./state.js";
+import { isNamedTunnelReady, readTunnelState, tunnelStateFile, writeTunnelState, type TunnelState } from "./state.js";
 import { ensureDir } from "../config/paths.js";
 import path from "node:path";
 
@@ -58,6 +58,15 @@ export async function setupNamedDomain<T extends { mcpUrl: string | null }>(
     const previous = readTunnelState(workspace.id);
     const observation = await deps.observe(workspace.id);
     if (observation.state === "unknown") throw new Error(`Bridge state is uncertain (${observation.reason})`);
+    if (isNamedTunnelReady(previous) && previous.tunnelId && previous.hostname === hostname) {
+      // Repeated setup must not depend on Cloudflare's management API. The
+      // saved UUID, credentials and DNS route were provisioned previously;
+      // connect() still reconciles a stale quick Bridge before returning.
+      const connection = await connect(previous);
+      if (connection.mcpUrl !== `https://${hostname}/mcp`) throw new Error("PUBLIC_ENDPOINT_MISMATCH: Bridge 返回了其他域名");
+      await deps.verify(hostname, workspace.id);
+      return connection;
+    }
     const result = await deps.provision({
       workspaceId: workspace.id, workspaceName: workspace.name,
       hostname, strict: true, persist: false,
