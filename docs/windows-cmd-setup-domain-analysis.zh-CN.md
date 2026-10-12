@@ -401,7 +401,9 @@ WealthSail  → https://wealthsail.sinojelly.kdns.fr/mcp
 
 用户在 WealthSail 执行无参数 setup 后报告 `cloudflared exited (code 1) before establishing a tunnel`。精确匹配源码发现：`before establishing a tunnel` 由 **Quick Tunnel** 提供器抛出，Named Tunnel 的对应错误写作 `before establishing the named tunnel`。所以仅凭此报错，不能认定已保存的固定域名隧道本身退出。检查时本机默认用户状态文件仍为 `preference: named`，现存 Bridge 的 provider 为 `cloudflare-named`；两个固定域名的 `/health` 也都能返回正确的工作区 ID。这与报错所用的 Quick Tunnel 路径不一致。
 
-现场尚未取得报错的同一个 CMD 窗口中的 `where c2c`、`echo %C2C_STATE_DIR%`、`c2c tunnel status --json` 输出，因此不能断言该窗口具体是用了不同的 CLI 入口、状态目录，还是在之前的另一次快速隧道启动中失败。排查时应在同一窗口运行这些只读命令，避免从另一个终端的状态推断原因。
+后来取得报错的同一个 CMD 窗口的输出：`where c2c` 为 `D:\Tools\cmd\c2c.cmd`，该脚本调用本仓库的 `bin\c2c.js`；`C2C_STATE_DIR` 未设置；`LOCALAPPDATA` 为 `C:\Users\Jelly\AppData\Local`；`c2c workspace --json` 的 ID 为 `7d8d3c79bbbb`。CLI 入口、默认状态目录和工作区 ID 均与本机排查时一致，因此“使用了另一个 CLI／工作区／显式状态目录”的初步猜测已排除。
+
+关键的现场证据是：报错窗口的 `c2c tunnel status --json` 返回 `preference: "unset"`、`namedReady: false`，所以这次无参数 setup 确实会选择 Quick Tunnel。这解释了为何出现 Quick 专属的 `before establishing a tunnel` 报错；但**尚不能解释**状态为何是 `unset`。本机同路径下读到 `C:\Users\Jelly\AppData\Local\codex-with-chatgpt\tunnels\7d8d3c79bbbb.json`，其内容为 `preference: "named"`，最后修改时间为 2026-10-12 20:34:29。`readJsonIfExists` 会把文件不存在、读取失败与 JSON 解析失败统一返回 `null`，调用者随即合成 `unset`；单次状态输出无法区分这几种情况，也无法确认用户输出与文件修改的先后顺序。下一步需在**同一个 CMD 窗口、同一时间**再次运行 `c2c tunnel status --json` 和 `dir "%LOCALAPPDATA%\codex-with-chatgpt\tunnels\7d8d3c79bbbb.json"`。若仍为 `unset` 且文件存在，再检查读取权限和 JSON 内容；若已变成 `named`，重新运行无参数 setup，应走固定域名。
 
 代码检查还发现 Quick Tunnel 处理进程退出时会把先前捕获的 `ERR` 行覆盖成通用的 `cloudflared exited (code 1)`。新增回归测试先复现这条诊断丢失，再修改退出处理保留原错误行，便于下一次准确定位 Cloudflare 返回的原因。
 
