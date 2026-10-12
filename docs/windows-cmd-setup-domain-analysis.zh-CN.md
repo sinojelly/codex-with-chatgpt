@@ -403,7 +403,11 @@ WealthSail  → https://wealthsail.sinojelly.kdns.fr/mcp
 
 后来取得报错的同一个 CMD 窗口的输出：`where c2c` 为 `D:\Tools\cmd\c2c.cmd`，该脚本调用本仓库的 `bin\c2c.js`；`C2C_STATE_DIR` 未设置；`LOCALAPPDATA` 为 `C:\Users\Jelly\AppData\Local`；`c2c workspace --json` 的 ID 为 `7d8d3c79bbbb`。CLI 入口、默认状态目录和工作区 ID 均与本机排查时一致，因此“使用了另一个 CLI／工作区／显式状态目录”的初步猜测已排除。
 
-关键的现场证据是：报错窗口的 `c2c tunnel status --json` 返回 `preference: "unset"`、`namedReady: false`，所以这次无参数 setup 确实会选择 Quick Tunnel。这解释了为何出现 Quick 专属的 `before establishing a tunnel` 报错；但**尚不能解释**状态为何是 `unset`。本机同路径下读到 `C:\Users\Jelly\AppData\Local\codex-with-chatgpt\tunnels\7d8d3c79bbbb.json`，其内容为 `preference: "named"`，最后修改时间为 2026-10-12 20:34:29。`readJsonIfExists` 会把文件不存在、读取失败与 JSON 解析失败统一返回 `null`，调用者随即合成 `unset`；单次状态输出无法区分这几种情况，也无法确认用户输出与文件修改的先后顺序。下一步需在**同一个 CMD 窗口、同一时间**再次运行 `c2c tunnel status --json` 和 `dir "%LOCALAPPDATA%\codex-with-chatgpt\tunnels\7d8d3c79bbbb.json"`。若仍为 `unset` 且文件存在，再检查读取权限和 JSON 内容；若已变成 `named`，重新运行无参数 setup，应走固定域名。
+关键的现场证据是：报错窗口的 `c2c tunnel status --json` 返回 `preference: "unset"`、`namedReady: false`，所以这次无参数 setup 确实会选择 Quick Tunnel。这解释了为何出现 Quick 专属的 `before establishing a tunnel` 报错。用户在同一个 CMD 窗口再次运行 status，仍为 `unset`；随后 `dir "%LOCALAPPDATA%\codex-with-chatgpt\tunnels\7d8d3c79bbbb.json"` 返回“找不到文件”，列出 `tunnels` 目录也为空。故该 CMD 所见的直接原因是**该工作区的固定域名状态文件不存在**，与 cloudflared 是否登录无关。`readJsonIfExists` 在文件不存在时返回 `null`，调用者合成 `unset`。
+
+本任务的执行环境在相同字面路径下能读到 `preference: "named"` 的状态文件，修改时间为 2026-10-12 20:34:29；即使进行只读提权检查也仍能读到。但这与用户当前 CMD 的目录结果矛盾，说明两边文件系统视图未一致，不能以本任务的状态文件作为用户机器上已经持久保存的证据，也不能声称其差异的底层原因已经查明。应以用户当前 CMD 的只读结果为准。
+
+用户随后在原 CMD 窗口运行 `c2c setup --domain wealthsail.sinojelly.kdns.fr` 并反馈成功。显式 setup 的实现只有在连接 URL 与所请求域名一致、且公网 `/health` 返回当前工作区 ID 后才写入 named 状态；因此这一步是将固定域名配置保存到用户当前环境的可靠恢复方式。用户未粘贴新的 status 或无参数 setup 输出，本轮不能把它们记为已实测通过。建议再运行 `c2c tunnel status --json`，确认 `preference: "named"`；之后无参数 setup 应恢复固定域名。若未来显式 setup 失败，应保留准确错误，不要把已存在的 DNS 记录强行改指向别的项目。
 
 代码检查还发现 Quick Tunnel 处理进程退出时会把先前捕获的 `ERR` 行覆盖成通用的 `cloudflared exited (code 1)`。新增回归测试先复现这条诊断丢失，再修改退出处理保留原错误行，便于下一次准确定位 Cloudflare 返回的原因。
 
